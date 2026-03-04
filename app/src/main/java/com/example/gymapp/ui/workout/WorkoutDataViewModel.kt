@@ -2,7 +2,7 @@ package com.example.gymapp.ui.workout
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.gymapp.data.local.WorkoutSession
+import com.example.gymapp.data.local.UserSession
 import com.example.gymapp.domain.repository.WorkoutRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -14,6 +14,6 @@ import kotlinx.coroutines.flow.stateIn
 class WorkoutDataViewModel @Inject constructor(
     repository: WorkoutRepository,
 ) : ViewModel() {
-    val workoutSessions: StateFlow<List<WorkoutSession>> = repository.observeWorkoutSessions()
+    val workoutSessions: StateFlow<List<UserSession>> = repository.observeWorkoutSessions()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 }

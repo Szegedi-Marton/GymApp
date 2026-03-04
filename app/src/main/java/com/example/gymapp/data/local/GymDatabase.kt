@@ -5,8 +5,12 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 
 @Database(
-    entities = [WorkoutSession::class],
-    version = 1,
+    entities = [
+        Exercise::class,
+        WorkoutPlan::class,
+        UserSession::class,
+    ],
+    version = 2,
     exportSchema = false,
 )
 @TypeConverters(ExerciseListConverter::class)
