@@ -24,13 +24,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.composed
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -57,6 +58,7 @@ data class WorkoutState(
     val reps: Int = 0,
     val setCount: Int = 1,
     val motionProgress: Float = 0f,
+    val repTrigger: Long = 0L,
 )
 
 sealed interface UserIntent {
@@ -68,7 +70,6 @@ class WorkoutViewModel : ViewModel() {
     val state: StateFlow<WorkoutState> = _state.asStateFlow()
 
     private val reduceMutex = Mutex()
-    private val repMotion = Animatable(0f)
 
     fun onIntent(intent: UserIntent) {
         viewModelScope.launch {
@@ -88,28 +89,8 @@ class WorkoutViewModel : ViewModel() {
                         it.copy(
                             reps = if (completedSet) 0 else incrementedReps,
                             setCount = if (completedSet) it.setCount + 1 else it.setCount,
+                            repTrigger = it.repTrigger + 1
                         )
-                    }
-
-                    repMotion.snapTo(0f)
-                    repMotion.animateTo(
-                        targetValue = 1f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioHighBouncy,
-                            stiffness = Spring.StiffnessMedium,
-                        ),
-                    ) {
-                        _state.update { current ->
-                            current.copy(motionProgress = value.coerceIn(0f, 1f))
-                        }
-                    }
-                    repMotion.animateTo(
-                        targetValue = 0f,
-                        animationSpec = tween(durationMillis = 180, easing = LinearEasing),
-                    ) {
-                        _state.update { current ->
-                            current.copy(motionProgress = value.coerceIn(0f, 1f))
-                        }
                     }
                 }
             }
@@ -126,8 +107,27 @@ fun LiveWorkoutRoute(modifier: Modifier = Modifier) {
     val viewModel: WorkoutViewModel = viewModel(factory = remember { workoutViewModelFactory() })
     val state by viewModel.state.collectAsState()
 
+    val animatedMotion = remember { Animatable(0f) }
+
+    LaunchedEffect(state.repTrigger) {
+        if (state.repTrigger > 0) {
+            animatedMotion.snapTo(0f)
+            animatedMotion.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioHighBouncy,
+                    stiffness = Spring.StiffnessMedium,
+                ),
+            )
+            animatedMotion.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(durationMillis = 180, easing = LinearEasing),
+            )
+        }
+    }
+
     LiveWorkoutScreen(
-        state = state,
+        state = state.copy(motionProgress = animatedMotion.value),
         onIncrementRep = { viewModel.onIntent(UserIntent.IncrementRep) },
         modifier = modifier,
     )

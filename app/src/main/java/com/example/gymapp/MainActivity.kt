@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.ui.Modifier
 import com.example.gymapp.ui.theme.GymAppTheme
@@ -15,8 +16,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             GymAppTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) {
-                    LiveWorkoutRoute()
+                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                    LiveWorkoutRoute(modifier = Modifier.padding(innerPadding))
                 }
             }
         }
