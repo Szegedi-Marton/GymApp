@@ -14,17 +14,22 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -66,6 +71,29 @@ data class WorkoutState(
     val setCount: Int = 1,
     val motionProgress: Float = 0f,
     val repTrigger: Long = 0L,
+    val exercises: List<ExerciseOption> = defaultExercises,
+    val plan: List<PlannedExercise> = emptyList(),
+    val selectedPlanExerciseId: String? = null,
+)
+
+data class ExerciseOption(
+    val id: String,
+    val name: String,
+    val targetSets: Int,
+)
+
+data class PlannedExercise(
+    val id: String,
+    val name: String,
+    val targetSets: Int,
+    val completedSets: Int = 0,
+)
+
+private val defaultExercises = listOf(
+    ExerciseOption("bench_press", "Bench Press", 4),
+    ExerciseOption("lat_pulldown", "Lat Pulldown", 4),
+    ExerciseOption("barbell_squat", "Barbell Squat", 5),
+    ExerciseOption("romanian_deadlift", "Romanian Deadlift", 3),
 )
 
 private enum class GymTab(val title: String) {
@@ -77,6 +105,8 @@ private enum class GymTab(val title: String) {
 
 sealed interface UserIntent {
     data object IncrementRep : UserIntent
+    data class AddExerciseToPlan(val exercise: ExerciseOption) : UserIntent
+    data class SelectPlanExercise(val planExerciseId: String) : UserIntent
 }
 
 class WorkoutViewModel : ViewModel() {
@@ -99,12 +129,54 @@ class WorkoutViewModel : ViewModel() {
                     val incrementedReps = latest.reps + 1
                     val completedSet = incrementedReps >= REPS_PER_SET
 
-                    _state.update {
-                        it.copy(
+                    _state.update { current ->
+                        val selectedExerciseId = current.selectedPlanExerciseId
+                        val nextPlan = if (completedSet && selectedExerciseId != null) {
+                            current.plan.map { exercise ->
+                                if (exercise.id == selectedExerciseId) {
+                                    exercise.copy(completedSets = exercise.completedSets + 1)
+                                } else {
+                                    exercise
+                                }
+                            }
+                        } else {
+                            current.plan
+                        }
+
+                        current.copy(
                             reps = if (completedSet) 0 else incrementedReps,
-                            setCount = if (completedSet) it.setCount + 1 else it.setCount,
-                            repTrigger = it.repTrigger + 1
+                            setCount = if (completedSet) current.setCount + 1 else current.setCount,
+                            plan = nextPlan,
+                            repTrigger = current.repTrigger + 1,
                         )
+                    }
+                }
+
+                is UserIntent.AddExerciseToPlan -> {
+                    _state.update { current ->
+                        if (current.plan.any { it.id == intent.exercise.id }) {
+                            current
+                        } else {
+                            val newPlanExercise = PlannedExercise(
+                                id = intent.exercise.id,
+                                name = intent.exercise.name,
+                                targetSets = intent.exercise.targetSets,
+                            )
+                            current.copy(
+                                plan = current.plan + newPlanExercise,
+                                selectedPlanExerciseId = current.selectedPlanExerciseId ?: newPlanExercise.id,
+                            )
+                        }
+                    }
+                }
+
+                is UserIntent.SelectPlanExercise -> {
+                    _state.update { current ->
+                        if (current.plan.any { it.id == intent.planExerciseId }) {
+                            current.copy(selectedPlanExerciseId = intent.planExerciseId)
+                        } else {
+                            current
+                        }
                     }
                 }
             }
@@ -143,6 +215,8 @@ fun LiveWorkoutRoute(modifier: Modifier = Modifier) {
     GymHomeScreen(
         state = state.copy(motionProgress = animatedMotion.value),
         onIncrementRep = { viewModel.onIntent(UserIntent.IncrementRep) },
+        onAddExerciseToPlan = { viewModel.onIntent(UserIntent.AddExerciseToPlan(it)) },
+        onSelectPlanExercise = { viewModel.onIntent(UserIntent.SelectPlanExercise(it)) },
         modifier = modifier,
     )
 }
@@ -151,6 +225,8 @@ fun LiveWorkoutRoute(modifier: Modifier = Modifier) {
 fun GymHomeScreen(
     state: WorkoutState,
     onIncrementRep: () -> Unit,
+    onAddExerciseToPlan: (ExerciseOption) -> Unit,
+    onSelectPlanExercise: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by remember { mutableStateOf(GymTab.Home) }
@@ -182,8 +258,19 @@ fun GymHomeScreen(
 
             when (selectedTab) {
                 GymTab.Home -> HomeGreetingScreen()
-                GymTab.Exercises -> TabPlaceholder(title = "Exercises", description = "Browse and track your exercises here.")
-                GymTab.Plan -> TabPlaceholder(title = "Plan", description = "Build your weekly training plan.")
+                GymTab.Exercises -> ExercisesTab(
+                    state = state,
+                    onAddExerciseToPlan = onAddExerciseToPlan,
+                    onOpenPlan = { selectedTab = GymTab.Plan },
+                )
+
+                GymTab.Plan -> PlanTab(
+                    plan = state.plan,
+                    selectedPlanExerciseId = state.selectedPlanExerciseId,
+                    onSelectPlanExercise = onSelectPlanExercise,
+                    onOpenCurrentSet = { selectedTab = GymTab.CurrentSet },
+                )
+
                 GymTab.CurrentSet -> CurrentSetScreen(state = state, onIncrementRep = onIncrementRep)
             }
         }
@@ -201,7 +288,7 @@ private fun HomeGreetingScreen() {
         Text(text = "Welcome to GymApp 👋", style = MaterialTheme.typography.headlineMedium, color = Color.White)
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            text = "Let's crush today's workout! Use the left sidebar to jump into exercises, your plan, or your current set.",
+            text = "Build your plan from Exercises, then pick an exercise in Plan to make it your current set.",
             style = MaterialTheme.typography.bodyLarge,
             color = Color(0xFFB8C6DE),
         )
@@ -209,16 +296,107 @@ private fun HomeGreetingScreen() {
 }
 
 @Composable
-private fun TabPlaceholder(title: String, description: String) {
+private fun ExercisesTab(
+    state: WorkoutState,
+    onAddExerciseToPlan: (ExerciseOption) -> Unit,
+    onOpenPlan: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 24.dp),
-        verticalArrangement = Arrangement.Center,
     ) {
-        Text(text = title, style = MaterialTheme.typography.headlineMedium, color = Color.White)
-        Spacer(modifier = Modifier.height(10.dp))
-        Text(text = description, style = MaterialTheme.typography.bodyLarge, color = Color(0xFFB8C6DE))
+        Text(text = "Exercises", style = MaterialTheme.typography.headlineMedium, color = Color.White)
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(text = "Create your plan by selecting exercises below.", color = Color(0xFFB8C6DE))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f)) {
+            items(state.exercises, key = { it.id }) { exercise ->
+                val inPlan = state.plan.any { it.id == exercise.id }
+                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF101728))) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column {
+                            Text(exercise.name, color = Color.White, style = MaterialTheme.typography.titleMedium)
+                            Text("${exercise.targetSets} target sets", color = Color(0xFF93A1B8))
+                        }
+                        Button(onClick = { onAddExerciseToPlan(exercise) }, enabled = !inPlan) {
+                            Text(if (inPlan) "Added" else "Add to Plan")
+                        }
+                    }
+                }
+            }
+        }
+
+        OutlinedButton(onClick = onOpenPlan, enabled = state.plan.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+            Text("Go to Plan (${state.plan.size})")
+        }
+    }
+}
+
+@Composable
+private fun PlanTab(
+    plan: List<PlannedExercise>,
+    selectedPlanExerciseId: String?,
+    onSelectPlanExercise: (String) -> Unit,
+    onOpenCurrentSet: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp),
+    ) {
+        Text(text = "Workout Plan", style = MaterialTheme.typography.headlineMedium, color = Color.White)
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(text = "Select an exercise to make it your current set.", color = Color(0xFFB8C6DE))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (plan.isEmpty()) {
+            Text("No exercises in your plan yet. Add them from the Exercises tab.", color = Color(0xFF93A1B8))
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f)) {
+                items(plan, key = { it.id }) { exercise ->
+                    val isSelected = selectedPlanExerciseId == exercise.id
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) Color(0xFF1A2D55) else Color(0xFF101728),
+                        ),
+                        onClick = { onSelectPlanExercise(exercise.id) },
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column {
+                                Text(exercise.name, color = Color.White, style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    "Sets: ${exercise.completedSets}/${exercise.targetSets}",
+                                    color = Color(0xFF93A1B8),
+                                )
+                            }
+                            Text(if (isSelected) "Selected" else "Select", color = Color(0xFF89F7FE))
+                        }
+                    }
+                }
+            }
+        }
+
+        OutlinedButton(
+            onClick = onOpenCurrentSet,
+            enabled = selectedPlanExerciseId != null,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Start Current Set")
+        }
     }
 }
 
@@ -227,6 +405,8 @@ private fun CurrentSetScreen(
     state: WorkoutState,
     onIncrementRep: () -> Unit,
 ) {
+    val selectedExercise = state.plan.firstOrNull { it.id == state.selectedPlanExerciseId }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -238,6 +418,14 @@ private fun CurrentSetScreen(
             text = "CURRENT SET",
             style = MaterialTheme.typography.labelLarge,
             color = Color(0xFF89F7FE),
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(
+            text = selectedExercise?.name ?: "Pick an exercise in Plan",
+            style = MaterialTheme.typography.titleLarge,
+            color = Color.White,
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -261,9 +449,17 @@ private fun CurrentSetScreen(
             WorkoutMetric(title = "MOTION", value = "${(state.motionProgress * 100).roundToInt()}%")
         }
 
+        if (selectedExercise != null) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Plan progress: ${selectedExercise.completedSets}/${selectedExercise.targetSets} sets",
+                color = Color(0xFF93A1B8),
+            )
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
 
-        Button(onClick = onIncrementRep) {
+        Button(onClick = onIncrementRep, enabled = selectedExercise != null) {
             Text(text = "Add Rep")
         }
     }
