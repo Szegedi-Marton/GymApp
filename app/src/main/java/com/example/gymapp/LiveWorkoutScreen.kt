@@ -1,21 +1,16 @@
 package com.example.gymapp
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,25 +19,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -60,13 +47,10 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -87,29 +71,42 @@ data class WorkoutState(
     val setCount: Int = 1,
     val motionProgress: Float = 0f,
     val repTrigger: Long = 0L,
+    val exercises: List<ExerciseOption> = defaultExercises,
+    val plan: List<PlannedExercise> = emptyList(),
+    val selectedPlanExerciseId: String? = null,
 )
 
-private enum class GymTab(val title: String, val icon: ImageVector) {
-    Home("Home", Icons.Default.Home),
-    Exercises("Exercises", Icons.Default.Search),
-    Plan("Plan", Icons.Default.Build),
-    CurrentSet("Current Set", Icons.Default.PlayArrow),
+data class ExerciseOption(
+    val id: String,
+    val name: String,
+    val targetSets: Int,
+)
+
+data class PlannedExercise(
+    val id: String,
+    val name: String,
+    val targetSets: Int,
+    val completedSets: Int = 0,
+)
+
+private val defaultExercises = listOf(
+    ExerciseOption("bench_press", "Bench Press", 4),
+    ExerciseOption("lat_pulldown", "Lat Pulldown", 4),
+    ExerciseOption("barbell_squat", "Barbell Squat", 5),
+    ExerciseOption("romanian_deadlift", "Romanian Deadlift", 3),
+)
+
+private enum class GymTab(val title: String) {
+    Home("Home"),
+    Exercises("Exercises"),
+    Plan("Plan"),
+    CurrentSet("Current Set"),
 }
-
-data class Exercise(val name: String, val muscleGroup: String, val description: String)
-
-val exerciseList = listOf(
-    Exercise("Bench Press", "Chest", "The bench press is an upper-body weight training exercise in which the trainee presses a weight upwards while lying on a weight training bench."),
-    Exercise("Squat", "Legs", "A squat is a strength exercise in which the trainee lowers their hips from a standing position and then stands back up."),
-    Exercise("Deadlift", "Back", "The deadlift is a weight training exercise in which a loaded barbell or bar is lifted off the ground to the level of the hips, then lowered back to the ground."),
-    Exercise("Overhead Press", "Shoulders", "The overhead press is a weight training exercise in which a weight is pressed straight upwards from the shoulders until the arms are locked out."),
-    Exercise("Barbell Row", "Back", "A compound exercise that works the upper and middle back, as well as the biceps and shoulders."),
-    Exercise("Bicep Curls", "Arms", "An isolation exercise that primarily targets the biceps brachii muscle."),
-    Exercise("Tricep Dips", "Arms", "A compound exercise that primarily targets the triceps, while also working the shoulders and chest.")
-)
 
 sealed interface UserIntent {
     data object IncrementRep : UserIntent
+    data class AddExerciseToPlan(val exercise: ExerciseOption) : UserIntent
+    data class SelectPlanExercise(val planExerciseId: String) : UserIntent
 }
 
 class WorkoutViewModel : ViewModel() {
@@ -132,12 +129,54 @@ class WorkoutViewModel : ViewModel() {
                     val incrementedReps = latest.reps + 1
                     val completedSet = incrementedReps >= REPS_PER_SET
 
-                    _state.update {
-                        it.copy(
+                    _state.update { current ->
+                        val selectedExerciseId = current.selectedPlanExerciseId
+                        val nextPlan = if (completedSet && selectedExerciseId != null) {
+                            current.plan.map { exercise ->
+                                if (exercise.id == selectedExerciseId) {
+                                    exercise.copy(completedSets = exercise.completedSets + 1)
+                                } else {
+                                    exercise
+                                }
+                            }
+                        } else {
+                            current.plan
+                        }
+
+                        current.copy(
                             reps = if (completedSet) 0 else incrementedReps,
-                            setCount = if (completedSet) it.setCount + 1 else it.setCount,
-                            repTrigger = it.repTrigger + 1
+                            setCount = if (completedSet) current.setCount + 1 else current.setCount,
+                            plan = nextPlan,
+                            repTrigger = current.repTrigger + 1,
                         )
+                    }
+                }
+
+                is UserIntent.AddExerciseToPlan -> {
+                    _state.update { current ->
+                        if (current.plan.any { it.id == intent.exercise.id }) {
+                            current
+                        } else {
+                            val newPlanExercise = PlannedExercise(
+                                id = intent.exercise.id,
+                                name = intent.exercise.name,
+                                targetSets = intent.exercise.targetSets,
+                            )
+                            current.copy(
+                                plan = current.plan + newPlanExercise,
+                                selectedPlanExerciseId = current.selectedPlanExerciseId ?: newPlanExercise.id,
+                            )
+                        }
+                    }
+                }
+
+                is UserIntent.SelectPlanExercise -> {
+                    _state.update { current ->
+                        if (current.plan.any { it.id == intent.planExerciseId }) {
+                            current.copy(selectedPlanExerciseId = intent.planExerciseId)
+                        } else {
+                            current
+                        }
                     }
                 }
             }
@@ -176,6 +215,8 @@ fun LiveWorkoutRoute(modifier: Modifier = Modifier) {
     GymHomeScreen(
         state = state.copy(motionProgress = animatedMotion.value),
         onIncrementRep = { viewModel.onIntent(UserIntent.IncrementRep) },
+        onAddExerciseToPlan = { viewModel.onIntent(UserIntent.AddExerciseToPlan(it)) },
+        onSelectPlanExercise = { viewModel.onIntent(UserIntent.SelectPlanExercise(it)) },
         modifier = modifier,
     )
 }
@@ -184,112 +225,54 @@ fun LiveWorkoutRoute(modifier: Modifier = Modifier) {
 fun GymHomeScreen(
     state: WorkoutState,
     onIncrementRep: () -> Unit,
+    onAddExerciseToPlan: (ExerciseOption) -> Unit,
+    onSelectPlanExercise: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by remember { mutableStateOf(GymTab.Home) }
-    var isSidebarExpanded by remember { mutableStateOf(false) }
-    val sidebarWidth by animateDpAsState(if (isSidebarExpanded) 200.dp else 72.dp, label = "sidebarWidth")
 
     Surface(
         modifier = modifier.fillMaxSize(),
         color = Color(0xFF05070D),
     ) {
-        Row(modifier = Modifier.fillMaxSize()) {
-            // Custom Expandable Sidebar
-            Column(
-                modifier = Modifier
-                    .width(sidebarWidth)
-                    .fillMaxHeight()
-                    .padding(vertical = 16.dp, horizontal = 8.dp) // Added horizontal padding for "floating" effect
-                    .clip(RoundedCornerShape(24.dp)) // Rounded edges
-                    .background(Color(0xFF0C1324)),
-                horizontalAlignment = Alignment.Start
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(vertical = 20.dp),
+        ) {
+            NavigationRail(
+                containerColor = Color(0xFF0C1324),
+                modifier = Modifier.fillMaxHeight(),
             ) {
-                // Fixed Expand Button aligned with icons
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
-                        .padding(horizontal = 8.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    IconButton(
-                        onClick = { isSidebarExpanded = !isSidebarExpanded },
-                        modifier = Modifier.size(40.dp) // Match SidebarItem icon box size
-                    ) {
-                        Icon(Icons.Default.Menu, contentDescription = "Toggle Sidebar", tint = Color.White)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
                 GymTab.entries.forEach { tab ->
-                    SidebarItem(
-                        tab = tab,
-                        isSelected = selectedTab == tab,
-                        isExpanded = isSidebarExpanded,
-                        onClick = { selectedTab = tab }
+                    NavigationRailItem(
+                        selected = selectedTab == tab,
+                        onClick = { selectedTab = tab },
+                        icon = { Text(tab.title.take(1), color = Color.White) },
+                        label = { Text(tab.title, textAlign = TextAlign.Center) },
                     )
                 }
             }
 
-            // Main Content Area
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-            ) {
-                when (selectedTab) {
-                    GymTab.Home -> HomeGreetingScreen()
-                    GymTab.Exercises -> ExercisesScreen()
-                    GymTab.Plan -> TabPlaceholder(title = "Plan", description = "Build your weekly training plan.")
-                    GymTab.CurrentSet -> CurrentSetScreen(state = state, onIncrementRep = onIncrementRep)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SidebarItem(
-    tab: GymTab,
-    isSelected: Boolean,
-    isExpanded: Boolean,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(56.dp)
-            .padding(horizontal = 8.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Start
-    ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(if (isSelected) Color(0xFF89F7FE).copy(alpha = 0.2f) else Color.Transparent),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                tab.icon,
-                contentDescription = tab.title,
-                tint = if (isSelected) Color(0xFF89F7FE) else Color(0xFF6F7D95)
-            )
-        }
-
-        if (isExpanded) {
             Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = tab.title,
-                color = if (isSelected) Color.White else Color(0xFF6F7D95),
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+
+            when (selectedTab) {
+                GymTab.Home -> HomeGreetingScreen()
+                GymTab.Exercises -> ExercisesTab(
+                    state = state,
+                    onAddExerciseToPlan = onAddExerciseToPlan,
+                    onOpenPlan = { selectedTab = GymTab.Plan },
+                )
+
+                GymTab.Plan -> PlanTab(
+                    plan = state.plan,
+                    selectedPlanExerciseId = state.selectedPlanExerciseId,
+                    onSelectPlanExercise = onSelectPlanExercise,
+                    onOpenCurrentSet = { selectedTab = GymTab.CurrentSet },
+                )
+
+                GymTab.CurrentSet -> CurrentSetScreen(state = state, onIncrementRep = onIncrementRep)
+            }
         }
     }
 }
@@ -305,7 +288,7 @@ private fun HomeGreetingScreen() {
         Text(text = "Welcome to GymApp 👋", style = MaterialTheme.typography.headlineMedium, color = Color.White)
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            text = "Let's crush today's workout! Use the left sidebar to jump into exercises, your plan, or your current set.",
+            text = "Build your plan from Exercises, then pick an exercise in Plan to make it your current set.",
             style = MaterialTheme.typography.bodyLarge,
             color = Color(0xFFB8C6DE),
         )
@@ -313,136 +296,107 @@ private fun HomeGreetingScreen() {
 }
 
 @Composable
-private fun ExercisesScreen() {
-    var selectedExercise by remember { mutableStateOf<Exercise?>(null) }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp)
-        ) {
-            Text(text = "Exercises", style = MaterialTheme.typography.headlineMedium, color = Color.White)
-            Spacer(modifier = Modifier.height(16.dp))
-
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                items(exerciseList) { exercise ->
-                    ExerciseCard(
-                        exercise = exercise,
-                        onClick = { selectedExercise = exercise }
-                    )
-                }
-            }
-        }
-
-        if (selectedExercise != null) {
-            ExerciseDetailDialog(
-                exercise = selectedExercise!!,
-                onDismiss = { selectedExercise = null }
-            )
-        }
-    }
-}
-
-@Composable
-private fun ExerciseDetailDialog(exercise: Exercise, onDismiss: () -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF101728))
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = exercise.name,
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = Color.White
-                    )
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF6F7D95))
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                Text(
-                    text = exercise.muscleGroup,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Color(0xFF89F7FE),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = exercise.description,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = Color(0xFFB8C6DE),
-                    lineHeight = MaterialTheme.typography.bodyLarge.lineHeight * 1.2f
-                )
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                Button(
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("Got it")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ExerciseCard(exercise: Exercise, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xFF101728))
-            .clickable(onClick = onClick)
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = exercise.name, style = MaterialTheme.typography.titleMedium, color = Color.White)
-            Text(text = exercise.muscleGroup, style = MaterialTheme.typography.bodySmall, color = Color(0xFF6F7D95))
-        }
-        Icon(
-            imageVector = Icons.Default.PlayArrow,
-            contentDescription = "Details",
-            tint = Color(0xFF89F7FE).copy(alpha = 0.6f),
-            modifier = Modifier.size(20.dp)
-        )
-    }
-}
-
-@Composable
-private fun TabPlaceholder(title: String, description: String) {
+private fun ExercisesTab(
+    state: WorkoutState,
+    onAddExerciseToPlan: (ExerciseOption) -> Unit,
+    onOpenPlan: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 24.dp),
-        verticalArrangement = Arrangement.Center,
     ) {
-        Text(text = title, style = MaterialTheme.typography.headlineMedium, color = Color.White)
-        Spacer(modifier = Modifier.height(10.dp))
-        Text(text = description, style = MaterialTheme.typography.bodyLarge, color = Color(0xFFB8C6DE))
+        Text(text = "Exercises", style = MaterialTheme.typography.headlineMedium, color = Color.White)
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(text = "Create your plan by selecting exercises below.", color = Color(0xFFB8C6DE))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f)) {
+            items(state.exercises, key = { it.id }) { exercise ->
+                val inPlan = state.plan.any { it.id == exercise.id }
+                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF101728))) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column {
+                            Text(exercise.name, color = Color.White, style = MaterialTheme.typography.titleMedium)
+                            Text("${exercise.targetSets} target sets", color = Color(0xFF93A1B8))
+                        }
+                        Button(onClick = { onAddExerciseToPlan(exercise) }, enabled = !inPlan) {
+                            Text(if (inPlan) "Added" else "Add to Plan")
+                        }
+                    }
+                }
+            }
+        }
+
+        OutlinedButton(onClick = onOpenPlan, enabled = state.plan.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+            Text("Go to Plan (${state.plan.size})")
+        }
+    }
+}
+
+@Composable
+private fun PlanTab(
+    plan: List<PlannedExercise>,
+    selectedPlanExerciseId: String?,
+    onSelectPlanExercise: (String) -> Unit,
+    onOpenCurrentSet: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp),
+    ) {
+        Text(text = "Workout Plan", style = MaterialTheme.typography.headlineMedium, color = Color.White)
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(text = "Select an exercise to make it your current set.", color = Color(0xFFB8C6DE))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (plan.isEmpty()) {
+            Text("No exercises in your plan yet. Add them from the Exercises tab.", color = Color(0xFF93A1B8))
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f)) {
+                items(plan, key = { it.id }) { exercise ->
+                    val isSelected = selectedPlanExerciseId == exercise.id
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) Color(0xFF1A2D55) else Color(0xFF101728),
+                        ),
+                        onClick = { onSelectPlanExercise(exercise.id) },
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column {
+                                Text(exercise.name, color = Color.White, style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    "Sets: ${exercise.completedSets}/${exercise.targetSets}",
+                                    color = Color(0xFF93A1B8),
+                                )
+                            }
+                            Text(if (isSelected) "Selected" else "Select", color = Color(0xFF89F7FE))
+                        }
+                    }
+                }
+            }
+        }
+
+        OutlinedButton(
+            onClick = onOpenCurrentSet,
+            enabled = selectedPlanExerciseId != null,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Start Current Set")
+        }
     }
 }
 
@@ -451,6 +405,8 @@ private fun CurrentSetScreen(
     state: WorkoutState,
     onIncrementRep: () -> Unit,
 ) {
+    val selectedExercise = state.plan.firstOrNull { it.id == state.selectedPlanExerciseId }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -462,6 +418,14 @@ private fun CurrentSetScreen(
             text = "CURRENT SET",
             style = MaterialTheme.typography.labelLarge,
             color = Color(0xFF89F7FE),
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(
+            text = selectedExercise?.name ?: "Pick an exercise in Plan",
+            style = MaterialTheme.typography.titleLarge,
+            color = Color.White,
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -485,9 +449,17 @@ private fun CurrentSetScreen(
             WorkoutMetric(title = "MOTION", value = "${(state.motionProgress * 100).roundToInt()}%")
         }
 
+        if (selectedExercise != null) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Plan progress: ${selectedExercise.completedSets}/${selectedExercise.targetSets} sets",
+                color = Color(0xFF93A1B8),
+            )
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
 
-        Button(onClick = onIncrementRep) {
+        Button(onClick = onIncrementRep, enabled = selectedExercise != null) {
             Text(text = "Add Rep")
         }
     }
