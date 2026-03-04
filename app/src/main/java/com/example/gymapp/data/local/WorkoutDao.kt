@@ -9,8 +9,8 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface WorkoutDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertSession(workoutSession: WorkoutSession)
+    suspend fun upsertSession(userSession: UserSession)
 
-    @Query("SELECT * FROM workout_sessions ORDER BY id DESC")
-    fun observeSessions(): Flow<List<WorkoutSession>>
+    @Query("SELECT * FROM user_sessions ORDER BY id DESC")
+    fun observeSessions(): Flow<List<UserSession>>
 }
