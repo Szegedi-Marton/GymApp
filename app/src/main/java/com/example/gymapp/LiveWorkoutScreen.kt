@@ -21,6 +21,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
@@ -76,6 +78,23 @@ data class WorkoutState(
     val selectedPlanExerciseId: String? = null,
     val isSetRunning: Boolean = false,
     val currentSetTimeSeconds: Int = 0,
+    val setHistory: List<SetHistoryEntry> = emptyList(),
+    val finishedExercises: List<FinishedExerciseEntry> = emptyList(),
+)
+
+data class SetHistoryEntry(
+    val exerciseId: String,
+    val exerciseName: String,
+    val setNumber: Int,
+    val targetSets: Int,
+    val targetReps: Int,
+    val durationSeconds: Int,
+)
+
+data class FinishedExerciseEntry(
+    val exerciseId: String,
+    val exerciseName: String,
+    val completedSets: Int,
 )
 
 data class ExerciseOption(
@@ -127,6 +146,7 @@ private enum class GymTab(val title: String, val icon: ImageVector) {
     Exercises("Exercises", Icons.Default.Search),
     Plan("Plan", Icons.Default.Build),
     CurrentSet("Current Set", Icons.Default.PlayArrow),
+    History("History", Icons.Default.History),
 }
 
 sealed interface UserIntent {
@@ -163,6 +183,8 @@ class WorkoutViewModel : ViewModel() {
                         stopTimer()
                         _state.update { current ->
                             val selectedExerciseId = current.selectedPlanExerciseId
+                            val selectedExercise = current.plan.firstOrNull { it.id == selectedExerciseId }
+                            val elapsedSetTime = current.currentSetTimeSeconds
                             val nextPlan = current.plan.map { exercise ->
                                 if (exercise.id == selectedExerciseId) {
                                     exercise.copy(completedSets = exercise.completedSets + 1)
@@ -170,10 +192,45 @@ class WorkoutViewModel : ViewModel() {
                                     exercise
                                 }
                             }
+
+                            val updatedExercise = selectedExerciseId?.let { id ->
+                                nextPlan.firstOrNull { it.id == id }
+                            }
+
+                            val nextSetHistory = if (selectedExercise != null) {
+                                current.setHistory + SetHistoryEntry(
+                                    exerciseId = selectedExercise.id,
+                                    exerciseName = selectedExercise.name,
+                                    setNumber = selectedExercise.completedSets + 1,
+                                    targetSets = selectedExercise.targetSets,
+                                    targetReps = selectedExercise.targetReps,
+                                    durationSeconds = elapsedSetTime,
+                                )
+                            } else {
+                                current.setHistory
+                            }
+
+                            val nextFinishedExercises = if (
+                                updatedExercise != null &&
+                                updatedExercise.completedSets >= updatedExercise.targetSets &&
+                                current.finishedExercises.none { it.exerciseId == updatedExercise.id }
+                            ) {
+                                current.finishedExercises + FinishedExerciseEntry(
+                                    exerciseId = updatedExercise.id,
+                                    exerciseName = updatedExercise.name,
+                                    completedSets = updatedExercise.completedSets,
+                                )
+                            } else {
+                                current.finishedExercises
+                            }
+
                             current.copy(
                                 isSetRunning = false,
                                 totalSetsCompleted = current.totalSetsCompleted + 1,
-                                plan = nextPlan
+                                currentSetTimeSeconds = 0,
+                                plan = nextPlan,
+                                setHistory = nextSetHistory,
+                                finishedExercises = nextFinishedExercises,
                             )
                         }
                     }
@@ -324,6 +381,11 @@ fun GymHomeScreen(
                         isCompact = isSidebarExpanded,
                         onStartSet = onStartSet,
                         onFinishSet = onFinishSet
+                    )
+                    GymTab.History -> HistoryTab(
+                        setHistory = state.setHistory,
+                        finishedExercises = state.finishedExercises,
+                        isCompact = isSidebarExpanded,
                     )
                 }
             }
@@ -609,6 +671,124 @@ private fun PlanTab(
             description = exercise.description,
             onDismiss = { selectedExerciseInfo = null }
         )
+    }
+}
+
+
+@Composable
+private fun HistoryTab(
+    setHistory: List<SetHistoryEntry>,
+    finishedExercises: List<FinishedExerciseEntry>,
+    isCompact: Boolean,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(if (isCompact) 12.dp else 24.dp),
+    ) {
+        Text(
+            text = "Workout History",
+            style = if (isCompact) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.headlineMedium,
+            color = Color.White
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Track completed sets and finished exercises in this session.",
+            color = Color(0xFFB8C6DE),
+            style = if (isCompact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Finished Exercises",
+            color = Color(0xFF89F7FE),
+            style = if (isCompact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (finishedExercises.isEmpty()) {
+            Text(
+                text = "No finished exercises yet.",
+                color = Color(0xFF93A1B8),
+                style = if (isCompact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier.height(if (isCompact) 120.dp else 160.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(finishedExercises, key = { it.exerciseId }) { exercise ->
+                    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF101728))) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(if (isCompact) 10.dp else 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = exercise.exerciseName,
+                                color = Color.White,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = "Finished",
+                                    tint = Color(0xFF00C853),
+                                    modifier = Modifier.size(if (isCompact) 16.dp else 18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "${exercise.completedSets} sets",
+                                    color = Color(0xFFB8C6DE),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Set History",
+            color = Color(0xFF89F7FE),
+            style = if (isCompact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (setHistory.isEmpty()) {
+            Text(
+                text = "No completed sets yet.",
+                color = Color(0xFF93A1B8),
+                style = if (isCompact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+            )
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(setHistory.reversed()) { entry ->
+                    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF101728))) {
+                        Column(modifier = Modifier.padding(if (isCompact) 10.dp else 12.dp)) {
+                            Text(
+                                text = entry.exerciseName,
+                                color = Color.White,
+                                style = if (isCompact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Set ${entry.setNumber}/${entry.targetSets} • ${entry.targetReps} reps • ${formatTime(entry.durationSeconds)}",
+                                color = Color(0xFFB8C6DE),
+                                style = if (isCompact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
